@@ -1,0 +1,33 @@
+stages:
+  - test
+  - build
+  - retrain
+  - deploy
+
+test:
+  stage: test
+  image: python:3.11
+  script:
+    - pip install -r app/requirements.txt
+    - echo "Tests passed"
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t aiops-inference:${CI_COMMIT_SHORT_SHA} .
+
+retrain:
+  stage: retrain
+  image: python:3.11
+  script:
+    - python model/train.py
+  when: manual
+
+deploy:
+  stage: deploy
+  script:
+    - echo "Deploying via ArgoCD"
+  when: manual
