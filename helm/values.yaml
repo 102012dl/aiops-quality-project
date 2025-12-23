@@ -8,6 +8,7 @@ image:
 service:
   type: ClusterIP
   port: 8000
+  targetPort: 8000
 
 resources:
   limits:
@@ -16,3 +17,12 @@ resources:
   requests:
     cpu: 250m
     memory: 256Mi
+
+env:
+  drift_threshold: "3.0"
+  log_level: "INFO"
+
+prometheus:
+  enabled: true
+  port: 8000
+  path: /metrics

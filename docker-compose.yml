@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  inference:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DRIFT_THRESHOLD=3.0
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs:/app/logs

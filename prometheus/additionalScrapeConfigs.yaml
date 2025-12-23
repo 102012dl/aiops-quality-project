@@ -1,0 +1,7 @@
+- job_name: 'aiops-inference-service'
+  static_configs:
+    - targets: ['aiops-inference.aiops.svc.cluster.local:8000']
+      labels:
+        service: 'aiops-inference'
+  metrics_path: '/metrics'
+  scrape_interval: 30s

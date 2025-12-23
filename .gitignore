@@ -1,6 +1,5 @@
 __pycache__/
 *.py[cod]
-*.so
 .Python
 venv/
 ENV/
@@ -9,4 +8,4 @@ ENV/
 *.pkl
 *.pt
 .env
-.git-credentials
+logs/

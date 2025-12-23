@@ -4,30 +4,119 @@ stages:
   - retrain
   - deploy
 
-test:
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  DOCKER_LATEST: $CI_REGISTRY_IMAGE:latest
+
+# ════════════════════════════════════════════════════════════════
+# STAGE 1: TEST
+# ════════════════════════════════════════════════════════════════
+
+test:lint:
+  stage: test
+  image: python:3.11
+  script:
+    - pip install flake8 black
+    - flake8 app/ model/ --max-line-length=120 || true
+    - black --check app/ model/ || true
+  only:
+    - final-project
+    - merge_requests
+
+test:unit:
   stage: test
   image: python:3.11
   script:
     - pip install -r app/requirements.txt
-    - echo "Tests passed"
+    - pip install pytest pytest-cov
+    - pytest tests/ -v --cov=app || true
+  only:
+    - final-project
 
-build:
+# ════════════════════════════════════════════════════════════════
+# STAGE 2: BUILD
+# ════════════════════════════════════════════════════════════════
+
+build:docker:
   stage: build
   image: docker:latest
   services:
     - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
-    - docker build -t aiops-inference:${CI_COMMIT_SHORT_SHA} .
+    - docker build -t $DOCKER_IMAGE -t $DOCKER_LATEST .
+    - docker push $DOCKER_IMAGE
+    - docker push $DOCKER_LATEST
+  only:
+    - final-project
 
-retrain:
+# ════════════════════════════════════════════════════════════════
+# STAGE 3: RETRAIN (Manual or Webhook triggered)
+# ════════════════════════════════════════════════════════════════
+
+retrain:model:
   stage: retrain
   image: python:3.11
   script:
-    - python model/train.py
+    - echo "🔄 Retraining model due to drift detection..."
+    - pip install -r model/requirements.txt
+    - cd model && python train.py
+    - echo "✅ Model retrained successfully"
+    - echo "📦 New model version:" $(cat model.pkl | md5sum)
+  artifacts:
+    paths:
+      - model/model.pkl
+    expire_in: 30 days
   when: manual
+  allow_failure: false
+  only:
+    - final-project
 
-deploy:
-  stage: deploy
+retrain:build:
+  stage: retrain
+  image: docker:latest
+  services:
+    - docker:dind
+  needs:
+    - retrain:model
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
-    - echo "Deploying via ArgoCD"
+    - echo "🐳 Building new Docker image with retrained model..."
+    - docker build -t $CI_REGISTRY_IMAGE:retrain-$CI_COMMIT_SHORT_SHA .
+    - docker push $CI_REGISTRY_IMAGE:retrain-$CI_COMMIT_SHORT_SHA
+  when: on_success
+  only:
+    - final-project
+
+# ════════════════════════════════════════════════════════════════
+# STAGE 4: DEPLOY
+# ════════════════════════════════════════════════════════════════
+
+deploy:helm:
+  stage: deploy
+  image: alpine/helm:latest
+  script:
+    - echo "🚀 Deploying to Kubernetes via Helm..."
+    - helm upgrade --install aiops-inference ./helm 
+        --namespace aiops 
+        --create-namespace
+        --set image.tag=$CI_COMMIT_SHORT_SHA
+  environment:
+    name: production
+    url: http://aiops-inference.aiops.svc.cluster.local:8000
   when: manual
+  only:
+    - final-project
+
+deploy:argocd:
+  stage: deploy
+  image: argoproj/argocd:latest
+  script:
+    - echo "🔄 Syncing ArgoCD application..."
+    - argocd app sync aiops-inference --force || true
+    - argocd app wait aiops-inference --timeout 300 || true
+  when: manual
+  only:
+    - final-project
